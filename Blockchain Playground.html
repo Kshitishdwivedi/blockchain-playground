@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Blockchain Playground</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#69727d;--bd:#dde1e6;--ac:#2f6fed;--ok:#1a8f4c;--bad:#d33a3a;--mono:ui-monospace,Menlo,Consolas,monospace;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171b;--card:#1d2127;--tx:#e7eaee;--mut:#8f99a5;--bd:#30363d;--ac:#5b8def;--ok:#3ecf7a;--bad:#ff6b6b}}
+:root[data-theme="dark"]{--bg:#14171b;--card:#1d2127;--tx:#e7eaee;--mut:#8f99a5;--bd:#30363d;--ac:#5b8def;--ok:#3ecf7a;--bad:#ff6b6b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:980px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:4px 0}h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px}
+.sub{color:var(--mut);margin:0 0 16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+input,select,button{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:7px 10px;min-width:0}
+input{flex:1 1 90px}input[type=number]{max-width:110px}
+button{cursor:pointer;background:var(--ac);color:#fff;border:0;font-weight:600}
+button.sec{background:var(--bg);color:var(--tx);border:1px solid var(--bd)}
+button:disabled{opacity:.5;cursor:wait}
+.bal{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--bd)}
+.mut{color:var(--mut)}.mono{font-family:var(--mono);font-size:12px;word-break:break-all}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-weight:600;font-size:13px}
+.ok{color:var(--ok);border:1px solid var(--ok)}.bad{color:var(--bad);border:1px solid var(--bad)}
+.chain{display:flex;flex-direction:column;gap:0}
+.blk{border:2px solid var(--ok);border-radius:12px;background:var(--card);padding:12px}
+.blk.broken{border-color:var(--bad)}
+.link{text-align:center;color:var(--mut);padding:4px;font-size:18px}
+.tx{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:14px;margin:3px 0}
+.tx input{max-width:80px;flex:0 0 auto;padding:3px 6px}
+.msg{font-size:13px;color:var(--bad);margin-top:6px}
+.kv{margin:2px 0}.kv b{display:inline-block;min-width:76px;color:var(--mut);font-weight:500}
+</style></head>
+<body><main>
+<h1>⛓️ Blockchain Playground</h1>
+<p class="sub">Send coins, mine blocks with proof-of-work, then try tampering with history and watch the chain break.</p>
+
+<div class="grid">
+  <div>
+    <div class="card"><h2>1 · Send coins</h2>
+      <div class="row"><input id="from" placeholder="From" list="names" value="alice"><input id="to" placeholder="To" list="names" value="bob">
+      <input id="amt" type="number" min="1" value="10"><button id="send">Add</button></div>
+      <datalist id="names"></datalist>
+      <div class="mut" style="font-size:13px">New coins only come from mining rewards, so mine first to fund an account.</div>
+      <div class="msg" id="err"></div>
+      <h2 style="margin-top:14px">Pending transactions</h2><div id="pend" class="mut">None</div>
+    </div>
+    <div class="card"><h2>2 · Mine a block</h2>
+      <div class="row"><input id="miner" placeholder="Miner name" value="alice">
+      <select id="diff" title="Difficulty (leading zeros)"><option value="2">Difficulty 2</option><option value="3" selected>Difficulty 3</option><option value="4">Difficulty 4</option><option value="5">Difficulty 5 (slow)</option></select>
+      <button id="mine">Mine</button></div>
+      <div class="mut" id="prog" style="font-size:13px">Reward: 50 coins to the miner. Each extra zero is ~16× more work.</div>
+    </div>
+  </div>
+  <div>
+    <div class="card"><h2>Balances</h2><div id="bals"></div></div>
+    <div class="card"><h2>Chain status</h2><div class="row"><span id="status" class="pill ok">Valid</span><span class="mut" id="count"></span></div>
+      <div class="row"><button class="sec" id="reset">Reset chain</button></div></div>
+  </div>
+</div>
+
+<h2>The chain</h2>
+<p class="mut" style="margin-top:-4px;font-size:13px">Edit any amount inside a block to tamper with it. Then use “Re-mine from here” to repair it, which redoes the work for that block and every later one.</p>
+<div class="chain" id="chain"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id), enc=new TextEncoder();
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function sha(s){const b=await crypto.subtle.digest('SHA-256',enc.encode(s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+const H=b=>sha(JSON.stringify({i:b.index,t:b.timestamp,tx:b.transactions,p:b.previousHash,n:b.nonce}));
+let chain=[],pending=[],busy=false,results=[];
+
+async function init(){const g={index:0,timestamp:0,transactions:[],previousHash:'0',nonce:0,difficulty:0};g.hash=await H(g);chain=[g];pending=[];await render()}
+
+function balance(a,withPending){let v=0;const add=t=>{if(t.to===a)v+=t.amount;if(t.from===a)v-=t.amount};
+  chain.forEach(b=>b.transactions.forEach(add));if(withPending)pending.forEach(add);return v}
+
+async function mineBlock(b,d){const t='0'.repeat(d);b.difficulty=d;b.nonce=0;let h=await H(b);
+  while(!h.startsWith(t)){b.nonce++;if(b.nonce%300===0){$('prog').textContent='Mining… tried '+b.nonce.toLocaleString()+' nonces';await new Promise(r=>setTimeout(r))}h=await H(b)}
+  b.hash=h}
+
+async function validate(){const out=[];
+  for(let i=0;i<chain.length;i++){const b=chain[i];let r='';
+    if(await H(b)!==b.hash)r='Contents no longer match this block’s hash';
+    else if(i>0&&b.previousHash!==chain[i-1].hash)r='Link to the previous block is broken';
+    else if(i>0&&!b.hash.startsWith('0'.repeat(b.difficulty)))r='Proof-of-work missing';
+    out.push(r)}
+  return out}
+
+async function render(){
+  results=await validate();
+  const names=new Set();chain.forEach(b=>b.transactions.forEach(t=>{names.add(t.from);names.add(t.to)}));pending.forEach(t=>{names.add(t.from);names.add(t.to)});names.delete('SYSTEM');
+  $('names').innerHTML=[...names].map(n=>`<option value="${esc(n)}">`).join('');
+  $('bals').innerHTML=names.size?[...names].map(n=>`<div class="bal"><span>${esc(n)}</span><b>${balance(n,false)}</b></div>`).join(''):'<span class="mut">No accounts yet. Mine a block to create coins.</span>';
+  $('pend').innerHTML=pending.length?pending.map(t=>`<div class="tx">${esc(t.from)} → ${esc(t.to)}: <b>${t.amount}</b></div>`).join(''):'None';
+  const bad=results.findIndex(r=>r);
+  $('status').className='pill '+(bad<0?'ok':'bad');
+  $('status').textContent=bad<0?'Valid':'Broken at block '+bad;
+  $('count').textContent=chain.length+' blocks';
+  $('chain').innerHTML=chain.map((b,i)=>{
+    const txs=i===0?'<div class="mut">Genesis block, no transactions</div>':b.transactions.map((t,j)=>
+      `<div class="tx">${esc(t.from)} → ${esc(t.to)}: <input type="number" value="${t.amount}" data-b="${i}" data-t="${j}" ${t.from==='SYSTEM'?'title="Mining reward"':''}></div>`).join('');
+    return (i?'<div class="link">↓ linked by hash</div>':'')+
+    `<div class="blk ${results[i]?'broken':''}"><div class="row" style="justify-content:space-between"><b>Block #${i}</b>
+      <span class="pill ${results[i]?'bad':'ok'}">${results[i]?esc(results[i]):'OK'}</span></div>
+      ${txs}
+      <div class="kv"><b>Prev hash</b><span class="mono">${esc(b.previousHash)}</span></div>
+      <div class="kv"><b>Hash</b><span class="mono">${esc(b.hash)}</span></div>
+      <div class="kv"><b>Nonce</b><span class="mono">${b.nonce}</span></div>
+      ${i&&results[i]?`<div class="row" style="margin-top:8px"><button class="sec" data-fix="${i}">Re-mine from here</button></div>`:''}
+    </div>`}).join('');
+}
+
+$('send').onclick=async()=>{const f=$('from').value.trim(),t=$('to').value.trim(),a=Math.floor(+$('amt').value);$('err').textContent='';
+  if(!f||!t||f===t)return $('err').textContent='Enter two different names.';
+  if(!(a>0))return $('err').textContent='Amount must be positive.';
+  if(balance(f,true)<a)return $('err').textContent=f+' has insufficient funds ('+balance(f,true)+' available).';
+  pending.push({from:f,to:t,amount:a});await render()};
+
+$('mine').onclick=async()=>{if(busy)return;const m=$('miner').value.trim();if(!m)return $('err').textContent='Enter a miner name.';
+  busy=true;$('mine').disabled=true;$('err').textContent='';const t0=performance.now();
+  const b={index:chain.length,timestamp:Date.now(),transactions:[...pending,{from:'SYSTEM',to:m,amount:50}],previousHash:chain[chain.length-1].hash,nonce:0};
+  await mineBlock(b,+$('diff').value);chain.push(b);pending=[];
+  $('prog').textContent='Mined block #'+b.index+' in '+((performance.now()-t0)/1000).toFixed(2)+'s after '+b.nonce.toLocaleString()+' tries.';
+  busy=false;$('mine').disabled=false;await render()};
+
+$('chain').addEventListener('change',async e=>{const el=e.target;if(el.dataset.b==null)return;
+  chain[+el.dataset.b].transactions[+el.dataset.t].amount=Math.floor(+el.value)||0;await render()});
+
+$('chain').addEventListener('click',async e=>{const i=e.target.dataset.fix;if(i==null||busy)return;
+  busy=true;e.target.disabled=true;
+  for(let k=+i;k<chain.length;k++){chain[k].previousHash=chain[k-1].hash;await mineBlock(chain[k],+$('diff').value)}
+  $('prog').textContent='Re-mined blocks '+i+'–'+(chain.length-1)+'. Notice how much work repairing history takes.';
+  busy=false;await render()});
+
+$('reset').onclick=()=>{if(!busy)init()};
+init();
+</script></body></html>
